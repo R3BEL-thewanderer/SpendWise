@@ -1,0 +1,6 @@
+{
+  "name": "SpendWise",
+  "description": "Premium native personal finance app for tracking expenses, managing budgets, visual analytics, and savings goals with an animated digital Gulak.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
