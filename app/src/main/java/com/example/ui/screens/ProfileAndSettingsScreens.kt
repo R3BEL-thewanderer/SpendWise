@@ -521,7 +521,7 @@ fun SettingsScreen(viewModel: SpendWiseViewModel) {
                             title = "Delete Account",
                             subtitle = "Permanently remove your data",
                             titleColor = Color(0xFFFF453A),
-                            onClick = { viewModel.showToast("Account deletion requires confirmation") }
+                            onClick = { viewModel.activeModal = ActiveModal.DELETE_ACCOUNT }
                         )
                     }
                 }

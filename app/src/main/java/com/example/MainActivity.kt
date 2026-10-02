@@ -64,7 +64,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val spendWiseViewModel: SpendWiseViewModel = viewModel()
+            val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
+            val spendWiseViewModel: SpendWiseViewModel = viewModel(
+                factory = com.example.state.SpendWiseViewModelFactory(context)
+            )
             val systemDark = isSystemInDarkTheme()
             val isDarkTheme = when (spendWiseViewModel.themeMode) {
                 ThemeMode.LIGHT -> false
@@ -238,6 +241,21 @@ fun SpendWiseApp(viewModel: SpendWiseViewModel) {
                             viewModel.activeModal = ActiveModal.NONE
                             viewModel.navigateTo(AppScreen.WELCOME)
                             viewModel.showToast("Logged out successfully")
+                        },
+                        onDismiss = { viewModel.activeModal = ActiveModal.NONE }
+                    )
+                }
+
+                ActiveModal.DELETE_ACCOUNT -> {
+                    ConfirmationDialog(
+                        title = "Delete Account & Data?",
+                        message = "This will permanently remove all your transactions, budgets, goals, and local settings from this device.",
+                        confirmButtonText = "Delete Everything",
+                        icon = Icons.Default.Delete,
+                        isDestructive = true,
+                        onConfirm = {
+                            viewModel.activeModal = ActiveModal.NONE
+                            viewModel.deleteAccount()
                         },
                         onDismiss = { viewModel.activeModal = ActiveModal.NONE }
                     )

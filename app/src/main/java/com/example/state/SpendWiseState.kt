@@ -1,11 +1,16 @@
 package com.example.state
 
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.example.data.local.LocalStorageManager
+import com.example.data.local.SettingsData
 import com.example.model.BudgetItem
 import com.example.model.CategoryAllocation
 import com.example.model.CategoryItem
@@ -14,6 +19,8 @@ import com.example.model.GoalItem
 import com.example.model.TransactionItem
 import com.example.model.TransactionType
 import com.example.model.UserProfile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 enum class AppScreen {
     WELCOME,
@@ -51,6 +58,7 @@ enum class ActiveModal {
     DELETE_INCOME,
     DELETE_BUDGET,
     DELETE_GOAL,
+    DELETE_ACCOUNT,
     LOGOUT,
     TRANSACTION_FILTER,
     SCAN_RECEIPT,
@@ -70,7 +78,11 @@ data class TransactionFilter(
     val maxAmount: Double = 100000.0
 )
 
-class SpendWiseViewModel : ViewModel() {
+class SpendWiseViewModel(
+    val storageManager: LocalStorageManager? = null
+) : ViewModel() {
+
+    var syncPersistenceForTesting: Boolean = false
 
     // Navigation & Screen Stack
     var currentScreen by mutableStateOf(AppScreen.WELCOME)
@@ -82,16 +94,35 @@ class SpendWiseViewModel : ViewModel() {
     var toastMessage by mutableStateOf<String?>(null)
 
     // Theme Mode
-    var themeMode by mutableStateOf(ThemeMode.LIGHT)
+    private var _themeMode by mutableStateOf(ThemeMode.LIGHT)
+    var themeMode: ThemeMode
+        get() = _themeMode
+        set(value) {
+            _themeMode = value
+            persistSettings()
+        }
 
     // User Profile
-    var userProfile by mutableStateOf(UserProfile())
+    private var _userProfile by mutableStateOf(UserProfile())
+    var userProfile: UserProfile
+        get() = _userProfile
+        set(value) {
+            _userProfile = value
+            persistUserProfile()
+        }
 
-    // Metrics (Mock state that can be adjusted dynamically)
+    // Metrics (Persisted State)
     var totalBalance by mutableDoubleStateOf(48250.0)
     var monthlyIncome by mutableDoubleStateOf(45000.0)
     var monthlyExpenses by mutableDoubleStateOf(24580.0)
-    var isBalanceVisible by mutableStateOf(true)
+
+    private var _isBalanceVisible by mutableStateOf(true)
+    var isBalanceVisible: Boolean
+        get() = _isBalanceVisible
+        set(value) {
+            _isBalanceVisible = value
+            persistSettings()
+        }
 
     // Selections
     var selectedTransaction by mutableStateOf<TransactionItem?>(null)
@@ -323,10 +354,166 @@ class SpendWiseViewModel : ViewModel() {
     )
 
     init {
+        if (storageManager != null) {
+            if (!storageManager.isInitialized()) {
+                // First launch: initialize demo data into local storage
+                storageManager.initializeDemoData(
+                    demoUser = _userProfile,
+                    demoTransactions = transactions.toList(),
+                    demoCategories = categories.toList(),
+                    demoBudgets = budgets.toList(),
+                    demoGoals = goals.toList(),
+                    demoSettings = currentSettings()
+                )
+            } else {
+                // Subsequent launch: restore persisted data from local storage
+                val data = storageManager.loadAll()
+                _userProfile = data.userProfile
+                transactions.clear()
+                transactions.addAll(data.transactions)
+                categories.clear()
+                categories.addAll(data.categories)
+                budgets.clear()
+                budgets.addAll(data.budgets)
+                goals.clear()
+                goals.addAll(data.goals)
+
+                _themeMode = try {
+                    ThemeMode.valueOf(data.settings.themeMode)
+                } catch (_: Exception) {
+                    ThemeMode.LIGHT
+                }
+                _isBalanceVisible = data.settings.isBalanceVisible
+                totalBalance = data.settings.totalBalance
+                monthlyIncome = data.settings.monthlyIncome
+                monthlyExpenses = data.settings.monthlyExpenses
+            }
+        }
         selectedGoal = goals.firstOrNull()
         selectedBudget = budgets.firstOrNull()
         selectedTransaction = transactions.firstOrNull()
         selectedCategory = categories.firstOrNull()
+    }
+
+    private fun currentSettings(): SettingsData {
+        return SettingsData(
+            themeMode = _themeMode.name,
+            isBalanceVisible = _isBalanceVisible,
+            totalBalance = totalBalance,
+            monthlyIncome = monthlyIncome,
+            monthlyExpenses = monthlyExpenses
+        )
+    }
+
+    private fun persistTransactions() {
+        val currentTxs = transactions.toList()
+        val currentSets = currentSettings()
+        val sm = storageManager ?: return
+        if (syncPersistenceForTesting) {
+            sm.saveTransactions(currentTxs)
+            sm.saveSettings(currentSets)
+        } else {
+            try {
+                viewModelScope.launch(Dispatchers.IO) {
+                    sm.saveTransactions(currentTxs)
+                    sm.saveSettings(currentSets)
+                }
+            } catch (_: Throwable) {
+                sm.saveTransactions(currentTxs)
+                sm.saveSettings(currentSets)
+            }
+        }
+    }
+
+    private fun persistGoals() {
+        val currentGoals = goals.toList()
+        val sm = storageManager ?: return
+        if (syncPersistenceForTesting) {
+            sm.saveGoals(currentGoals)
+        } else {
+            try {
+                viewModelScope.launch(Dispatchers.IO) {
+                    sm.saveGoals(currentGoals)
+                }
+            } catch (_: Throwable) {
+                sm.saveGoals(currentGoals)
+            }
+        }
+    }
+
+    private fun persistBudgets() {
+        val currentBudgets = budgets.toList()
+        val sm = storageManager ?: return
+        if (syncPersistenceForTesting) {
+            sm.saveBudgets(currentBudgets)
+        } else {
+            try {
+                viewModelScope.launch(Dispatchers.IO) {
+                    sm.saveBudgets(currentBudgets)
+                }
+            } catch (_: Throwable) {
+                sm.saveBudgets(currentBudgets)
+            }
+        }
+    }
+
+    private fun persistCategories() {
+        val currentCategories = categories.toList()
+        val sm = storageManager ?: return
+        if (syncPersistenceForTesting) {
+            sm.saveCategories(currentCategories)
+        } else {
+            try {
+                viewModelScope.launch(Dispatchers.IO) {
+                    sm.saveCategories(currentCategories)
+                }
+            } catch (_: Throwable) {
+                sm.saveCategories(currentCategories)
+            }
+        }
+    }
+
+    private fun persistUserProfile() {
+        val currentProfile = _userProfile
+        val sm = storageManager ?: return
+        if (syncPersistenceForTesting) {
+            sm.saveUserProfile(currentProfile)
+        } else {
+            try {
+                viewModelScope.launch(Dispatchers.IO) {
+                    sm.saveUserProfile(currentProfile)
+                }
+            } catch (_: Throwable) {
+                sm.saveUserProfile(currentProfile)
+            }
+        }
+    }
+
+    private fun persistSettings() {
+        val currentSets = currentSettings()
+        val sm = storageManager ?: return
+        if (syncPersistenceForTesting) {
+            sm.saveSettings(currentSets)
+        } else {
+            try {
+                viewModelScope.launch(Dispatchers.IO) {
+                    sm.saveSettings(currentSets)
+                }
+            } catch (_: Throwable) {
+                sm.saveSettings(currentSets)
+            }
+        }
+    }
+
+    fun persistAllSync() {
+        storageManager?.let { sm ->
+            sm.saveUserProfile(_userProfile)
+            sm.saveTransactions(transactions.toList())
+            sm.saveCategories(categories.toList())
+            sm.saveBudgets(budgets.toList())
+            sm.saveGoals(goals.toList())
+            sm.saveSettings(currentSettings())
+        }
     }
 
     // Navigation Methods
@@ -395,6 +582,7 @@ class SpendWiseViewModel : ViewModel() {
         monthlyExpenses += amount
         totalBalance -= amount
         showToast("Expense added successfully")
+        persistTransactions()
     }
 
     fun addIncome(
@@ -423,6 +611,7 @@ class SpendWiseViewModel : ViewModel() {
         monthlyIncome += amount
         totalBalance += amount
         showToast("Income added successfully")
+        persistTransactions()
     }
 
     fun updateTransaction(updatedTx: TransactionItem) {
@@ -431,6 +620,7 @@ class SpendWiseViewModel : ViewModel() {
             transactions[idx] = updatedTx
             selectedTransaction = updatedTx
             showToast("Changes saved")
+            persistTransactions()
         }
     }
 
@@ -447,6 +637,7 @@ class SpendWiseViewModel : ViewModel() {
             selectedTransaction = transactions.firstOrNull()
         }
         showToast("Transaction deleted")
+        persistTransactions()
     }
 
     // Goal Operations
@@ -475,6 +666,7 @@ class SpendWiseViewModel : ViewModel() {
         goals.add(0, newGoal)
         selectedGoal = newGoal
         showToast("Goal created successfully")
+        persistGoals()
     }
 
     fun addMoneyToGoal(goalId: String, amount: Double) {
@@ -495,6 +687,7 @@ class SpendWiseViewModel : ViewModel() {
             goals[idx] = updated
             selectedGoal = updated
             showToast("₹${amount.toInt()} added to ${g.name}!")
+            persistGoals()
         }
     }
 
@@ -504,6 +697,7 @@ class SpendWiseViewModel : ViewModel() {
             selectedGoal = goals.firstOrNull()
         }
         showToast("Goal deleted")
+        persistGoals()
     }
 
     // Budget Operations
@@ -524,6 +718,7 @@ class SpendWiseViewModel : ViewModel() {
         budgets.add(0, newBudget)
         selectedBudget = newBudget
         showToast("Budget created")
+        persistBudgets()
     }
 
     fun updateBudget(updated: BudgetItem) {
@@ -532,6 +727,7 @@ class SpendWiseViewModel : ViewModel() {
             budgets[idx] = updated
             selectedBudget = updated
             showToast("Budget updated")
+            persistBudgets()
         }
     }
 
@@ -541,6 +737,7 @@ class SpendWiseViewModel : ViewModel() {
             selectedBudget = budgets.firstOrNull()
         }
         showToast("Budget deleted")
+        persistBudgets()
     }
 
     // Category Operations
@@ -556,6 +753,7 @@ class SpendWiseViewModel : ViewModel() {
         categories.add(newCat)
         selectedCategory = newCat
         showToast("Category added")
+        persistCategories()
     }
 
     fun updateCategory(updated: CategoryItem) {
@@ -564,6 +762,7 @@ class SpendWiseViewModel : ViewModel() {
             categories[idx] = updated
             selectedCategory = updated
             showToast("Category updated")
+            persistCategories()
         }
     }
 
@@ -573,5 +772,39 @@ class SpendWiseViewModel : ViewModel() {
             selectedCategory = categories.firstOrNull()
         }
         showToast("Category deleted")
+        persistCategories()
+    }
+
+    fun deleteAccount() {
+        val sm = storageManager
+        if (sm != null) {
+            if (syncPersistenceForTesting) {
+                sm.clearAll()
+            } else {
+                try {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        sm.clearAll()
+                    }
+                } catch (_: Throwable) {
+                    sm.clearAll()
+                }
+            }
+        }
+        transactions.clear()
+        goals.clear()
+        budgets.clear()
+        categories.clear()
+        totalBalance = 0.0
+        monthlyIncome = 0.0
+        monthlyExpenses = 0.0
+        currentScreen = AppScreen.WELCOME
+        showToast("Account deleted and local data cleared")
+    }
+}
+
+class SpendWiseViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        return SpendWiseViewModel(LocalStorageManager(context)) as T
     }
 }
