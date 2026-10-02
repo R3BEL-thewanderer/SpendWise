@@ -11,6 +11,27 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.LocalStorageManager
 import com.example.data.local.SettingsData
+import com.example.domain.ai.NaturalLanguageAssistant
+import com.example.domain.ai.SmartInsightsEngine
+import com.example.domain.ai.model.AssistantMessage
+import com.example.domain.ai.model.MonthlyAiSummary
+import com.example.domain.ai.model.SmartInsight
+import com.example.domain.calculator.AnalyticsCalculator
+import com.example.domain.calculator.BudgetCalculator
+import com.example.domain.calculator.CategoryCalculator
+import com.example.domain.calculator.FinanceCalculator
+import com.example.domain.calculator.GoalCalculator
+import com.example.domain.filter.TransactionFilterService
+import com.example.domain.model.AnalyticsSummary
+import com.example.domain.model.BudgetCalculationResult
+import com.example.domain.model.CategoryBudgetResult
+import com.example.domain.model.CategorySpendingResult
+import com.example.domain.model.CustomDateRange
+import com.example.domain.model.DatePeriod
+import com.example.domain.model.FinanceTotals
+import com.example.domain.model.GoalCalculationResult
+import com.example.domain.model.ValidationResult
+import com.example.domain.validation.FinancialValidator
 import com.example.model.BudgetItem
 import com.example.model.CategoryAllocation
 import com.example.model.CategoryItem
@@ -62,6 +83,7 @@ enum class ActiveModal {
     LOGOUT,
     TRANSACTION_FILTER,
     SCAN_RECEIPT,
+    AI_ASSISTANT,
     ERROR_STATE
 }
 
@@ -356,7 +378,8 @@ class SpendWiseViewModel(
     init {
         if (storageManager != null) {
             if (!storageManager.isInitialized()) {
-                // First launch: initialize demo data into local storage
+                // First launch: recalculate metrics from demo data and initialize storage
+                recalculateMetrics()
                 storageManager.initializeDemoData(
                     demoUser = _userProfile,
                     demoTransactions = transactions.toList(),
@@ -384,15 +407,166 @@ class SpendWiseViewModel(
                     ThemeMode.LIGHT
                 }
                 _isBalanceVisible = data.settings.isBalanceVisible
-                totalBalance = data.settings.totalBalance
-                monthlyIncome = data.settings.monthlyIncome
-                monthlyExpenses = data.settings.monthlyExpenses
+                recalculateMetrics()
             }
+        } else {
+            recalculateMetrics()
         }
         selectedGoal = goals.firstOrNull()
         selectedBudget = budgets.firstOrNull()
         selectedTransaction = transactions.firstOrNull()
         selectedCategory = categories.firstOrNull()
+    }
+
+    /**
+     * Recalculates all derived metrics using the central domain calculators.
+     * Guarantees data consistency across the entire application.
+     */
+    fun recalculateMetrics() {
+        val totals = FinanceCalculator.calculateTotals(transactions)
+        monthlyIncome = totals.totalIncome
+        monthlyExpenses = totals.totalExpenses
+        totalBalance = totals.balance
+
+        // Update category spent amounts and transaction counts
+        for (i in categories.indices) {
+            val cat = categories[i]
+            val catTxs = transactions.filter {
+                it.type == TransactionType.EXPENSE && it.category.equals(cat.name, ignoreCase = true)
+            }
+            val spent = FinanceCalculator.roundMoney(catTxs.sumOf { it.amount })
+            if (cat.spentAmount != spent || cat.transactionCount != catTxs.size) {
+                categories[i] = cat.copy(spentAmount = spent, transactionCount = catTxs.size)
+            }
+        }
+
+        // Update budget spent amounts based on transactions for each budget's month
+        for (i in budgets.indices) {
+            val b = budgets[i]
+            val result = BudgetCalculator.calculateBudget(b, transactions)
+            if (b.spent != result.totalSpent) {
+                budgets[i] = b.copy(spent = result.totalSpent)
+            }
+        }
+    }
+
+    // Domain Accessors for UI
+    fun getFinanceTotals(): FinanceTotals = FinanceCalculator.calculateTotals(transactions)
+
+    fun getPeriodTotals(period: DatePeriod, customRange: CustomDateRange? = null): FinanceTotals =
+        FinanceCalculator.calculatePeriodTotals(transactions, period, customRange = customRange)
+
+    fun getBudgetResult(budget: BudgetItem): BudgetCalculationResult =
+        BudgetCalculator.calculateBudget(budget, transactions)
+
+    fun getCategoryBudgetResult(allocation: CategoryAllocation, budgetMonth: String): CategoryBudgetResult =
+        BudgetCalculator.calculateCategoryBudget(allocation, transactions, budgetMonth)
+
+    fun getGoalResult(goal: GoalItem): GoalCalculationResult =
+        GoalCalculator.calculateGoal(goal)
+
+    fun getCategoryBreakdown(): List<CategorySpendingResult> =
+        CategoryCalculator.calculateCategoryBreakdown(categories, transactions)
+
+    fun getAnalytics(period: DatePeriod = DatePeriod.CURRENT_MONTH): AnalyticsSummary =
+        AnalyticsCalculator.calculateAnalytics(transactions, categories, budgets, goals, period)
+
+    fun filterTransactions(
+        typeFilter: String = "All",
+        categoryFilter: String = "All",
+        datePeriod: DatePeriod = DatePeriod.ALL_TIME,
+        searchQuery: String = transactionSearchQuery
+    ): List<TransactionItem> = TransactionFilterService.filter(
+        transactions = transactions,
+        typeFilter = typeFilter,
+        categoryFilter = categoryFilter,
+        datePeriod = datePeriod,
+        searchQuery = searchQuery,
+        paymentMethod = transactionFilter.paymentMethod,
+        minAmount = transactionFilter.minAmount,
+        maxAmount = transactionFilter.maxAmount
+    )
+
+    // AI & Smart Insights Layer
+    val assistantMessages = mutableStateListOf<AssistantMessage>()
+    var isAssistantThinking by mutableStateOf(false)
+
+    fun getSmartInsights(): List<SmartInsight> {
+        return SmartInsightsEngine.generateInsights(
+            totals = getFinanceTotals(),
+            categoryBreakdown = getCategoryBreakdown(),
+            budgetResults = budgets.map { getBudgetResult(it) },
+            goalResults = goals.map { getGoalResult(it) },
+            monthlyTrends = AnalyticsCalculator.calculateMonthlyTrends(transactions),
+            transactions = transactions.toList()
+        )
+    }
+
+    fun getMonthlyAiSummary(monthLabel: String = "This Month"): MonthlyAiSummary {
+        return SmartInsightsEngine.generateMonthlySummary(
+            monthLabel = monthLabel,
+            totals = getFinanceTotals(),
+            topCategory = getCategoryBreakdown().firstOrNull { it.spentAmount > 0.0 },
+            budgetResults = budgets.map { getBudgetResult(it) }
+        )
+    }
+
+    fun openAiAssistant() {
+        if (assistantMessages.isEmpty()) {
+            val name = userProfile.name.split(" ").firstOrNull() ?: "there"
+            assistantMessages.add(
+                AssistantMessage(
+                    id = "msg-initial",
+                    text = "Hello $name! I'm your SpendWise AI assistant. I analyze your verified financial data to provide instant clarity.\n\nWhat would you like to know today?",
+                    isUser = false,
+                    suggestedActions = listOf(
+                        "Where did most of my money go?",
+                        "How much on food?",
+                        "Am I spending more than last month?",
+                        "How is my budget?",
+                        "What is my balance?"
+                    )
+                )
+            )
+        }
+        activeModal = ActiveModal.AI_ASSISTANT
+    }
+
+    fun askAssistant(userQuery: String) {
+        val trimmed = userQuery.trim()
+        if (trimmed.isBlank()) return
+        val userMsg = AssistantMessage(
+            id = "msg-${System.currentTimeMillis()}-u",
+            text = trimmed,
+            isUser = true
+        )
+        assistantMessages.add(userMsg)
+        isAssistantThinking = true
+
+        viewModelScope.launch {
+            val answer = NaturalLanguageAssistant.answerQuery(
+                query = trimmed,
+                totals = getFinanceTotals(),
+                categoryBreakdown = getCategoryBreakdown(),
+                budgetResults = budgets.map { getBudgetResult(it) },
+                goalResults = goals.map { getGoalResult(it) },
+                monthlyTrends = AnalyticsCalculator.calculateMonthlyTrends(transactions),
+                transactions = transactions.toList()
+            )
+            val assistantMsg = AssistantMessage(
+                id = "msg-${System.currentTimeMillis()}-a",
+                text = answer,
+                isUser = false,
+                suggestedActions = listOf(
+                    "Where did most of my money go?",
+                    "How much on food?",
+                    "Am I spending more than last month?",
+                    "How is my budget?"
+                )
+            )
+            assistantMessages.add(assistantMsg)
+            isAssistantThinking = false
+        }
     }
 
     private fun currentSettings(): SettingsData {
@@ -549,12 +723,26 @@ class SpendWiseViewModel(
         paymentMethod: String,
         tags: List<String>,
         notes: String
-    ) {
+    ): Boolean {
+        val txTitle = if (title.isNotBlank()) title else category
+        val validation = FinancialValidator.validateTransaction(
+            amount = amount,
+            type = TransactionType.EXPENSE,
+            category = category,
+            title = txTitle,
+            date = if (date.isNotBlank()) date else "Today"
+        )
+        if (!validation.isValid && validation is ValidationResult.Invalid) {
+            showToast(validation.message)
+            return false
+        }
+
+        val roundedAmount = FinanceCalculator.roundMoney(amount)
         val newTx = TransactionItem(
             id = "tx-${System.currentTimeMillis()}",
-            title = if (title.isNotBlank()) title else category,
+            title = txTitle,
             subtitle = category,
-            amount = amount,
+            amount = roundedAmount,
             type = TransactionType.EXPENSE,
             category = category,
             date = if (date.isNotBlank()) date else "Today",
@@ -579,10 +767,10 @@ class SpendWiseViewModel(
             }
         )
         transactions.add(0, newTx)
-        monthlyExpenses += amount
-        totalBalance -= amount
+        recalculateMetrics()
         showToast("Expense added successfully")
         persistTransactions()
+        return true
     }
 
     fun addIncome(
@@ -591,12 +779,25 @@ class SpendWiseViewModel(
         date: String,
         category: String,
         notes: String
-    ) {
+    ): Boolean {
+        val validation = FinancialValidator.validateTransaction(
+            amount = amount,
+            type = TransactionType.INCOME,
+            category = if (category.isNotBlank()) category else "Income",
+            title = source,
+            date = if (date.isNotBlank()) date else "Today"
+        )
+        if (!validation.isValid && validation is ValidationResult.Invalid) {
+            showToast(validation.message)
+            return false
+        }
+
+        val roundedAmount = FinanceCalculator.roundMoney(amount)
         val newTx = TransactionItem(
             id = "tx-${System.currentTimeMillis()}",
             title = source,
             subtitle = if (category.isNotBlank()) category else "Income",
-            amount = amount,
+            amount = roundedAmount,
             type = TransactionType.INCOME,
             category = "Income",
             date = if (date.isNotBlank()) date else "Today",
@@ -608,31 +809,41 @@ class SpendWiseViewModel(
             colorHex = 0xFFB9DEC9
         )
         transactions.add(0, newTx)
-        monthlyIncome += amount
-        totalBalance += amount
+        recalculateMetrics()
         showToast("Income added successfully")
         persistTransactions()
+        return true
     }
 
-    fun updateTransaction(updatedTx: TransactionItem) {
+    fun updateTransaction(updatedTx: TransactionItem): Boolean {
+        val validation = FinancialValidator.validateTransaction(
+            amount = updatedTx.amount,
+            type = updatedTx.type,
+            category = updatedTx.category,
+            title = updatedTx.title,
+            date = updatedTx.date
+        )
+        if (!validation.isValid && validation is ValidationResult.Invalid) {
+            showToast(validation.message)
+            return false
+        }
+
         val idx = transactions.indexOfFirst { it.id == updatedTx.id }
         if (idx != -1) {
-            transactions[idx] = updatedTx
-            selectedTransaction = updatedTx
+            val rounded = updatedTx.copy(amount = FinanceCalculator.roundMoney(updatedTx.amount))
+            transactions[idx] = rounded
+            selectedTransaction = rounded
+            recalculateMetrics()
             showToast("Changes saved")
             persistTransactions()
+            return true
         }
+        return false
     }
 
     fun deleteTransaction(tx: TransactionItem) {
         transactions.removeIf { it.id == tx.id }
-        if (tx.type == TransactionType.EXPENSE) {
-            monthlyExpenses = (monthlyExpenses - tx.amount).coerceAtLeast(0.0)
-            totalBalance += tx.amount
-        } else {
-            monthlyIncome = (monthlyIncome - tx.amount).coerceAtLeast(0.0)
-            totalBalance -= tx.amount
-        }
+        recalculateMetrics()
         if (selectedTransaction?.id == tx.id) {
             selectedTransaction = transactions.firstOrNull()
         }
@@ -650,45 +861,65 @@ class SpendWiseViewModel(
         iconType: String,
         colorHex: Long,
         description: String
-    ) {
+    ): Boolean {
+        val validation = FinancialValidator.validateGoal(name, targetAmount, currentSavings)
+        if (!validation.isValid && validation is ValidationResult.Invalid) {
+            showToast(validation.message)
+            return false
+        }
+
+        val roundedTarget = FinanceCalculator.roundMoney(targetAmount)
+        val roundedSavings = FinanceCalculator.roundMoney(currentSavings)
         val newGoal = GoalItem(
             id = "goal-${System.currentTimeMillis()}",
             name = name,
-            targetAmount = targetAmount,
-            currentSavings = currentSavings,
+            targetAmount = roundedTarget,
+            currentSavings = roundedSavings,
             targetDate = targetDate,
             category = category,
             iconType = iconType,
             colorHex = colorHex,
             description = description,
-            contributions = if (currentSavings > 0) listOf(GoalContribution("c-${System.currentTimeMillis()}", currentSavings, "Today", "Initial deposit")) else emptyList()
+            contributions = if (roundedSavings > 0) listOf(GoalContribution("c-${System.currentTimeMillis()}", roundedSavings, "Today", "Initial deposit")) else emptyList()
         )
         goals.add(0, newGoal)
         selectedGoal = newGoal
         showToast("Goal created successfully")
         persistGoals()
+        return true
     }
 
-    fun addMoneyToGoal(goalId: String, amount: Double) {
+    fun addMoneyToGoal(goalId: String, amount: Double): Boolean {
+        val goalExists = goals.any { it.id == goalId }
+        val validation = FinancialValidator.validateContribution(amount, goalExists)
+        if (!validation.isValid && validation is ValidationResult.Invalid) {
+            showToast(validation.message)
+            return false
+        }
+
         val idx = goals.indexOfFirst { it.id == goalId }
         if (idx != -1) {
             val g = goals[idx]
-            val newSavings = g.currentSavings + amount
+            val roundedAmount = FinanceCalculator.roundMoney(amount)
             val newContribution = GoalContribution(
                 id = "c-${System.currentTimeMillis()}",
-                amount = amount,
+                amount = roundedAmount,
                 date = "Today",
                 note = "Added Money"
             )
+            val newContributions = listOf(newContribution) + g.contributions
+            val newSavings = FinanceCalculator.roundMoney(g.currentSavings + roundedAmount)
             val updated = g.copy(
                 currentSavings = newSavings,
-                contributions = listOf(newContribution) + g.contributions
+                contributions = newContributions
             )
             goals[idx] = updated
             selectedGoal = updated
-            showToast("₹${amount.toInt()} added to ${g.name}!")
+            showToast("₹${roundedAmount.toInt()} added to ${g.name}!")
             persistGoals()
+            return true
         }
+        return false
     }
 
     fun deleteGoal(goal: GoalItem) {
@@ -706,26 +937,37 @@ class SpendWiseViewModel(
         totalLimit: Double,
         month: String,
         allocations: List<CategoryAllocation>
-    ) {
+    ): Boolean {
+        val validation = FinancialValidator.validateBudget(name, totalLimit, month)
+        if (!validation.isValid && validation is ValidationResult.Invalid) {
+            showToast(validation.message)
+            return false
+        }
+
+        val roundedLimit = FinanceCalculator.roundMoney(totalLimit)
         val newBudget = BudgetItem(
             id = "budget-${System.currentTimeMillis()}",
             name = name,
             month = month,
-            totalLimit = totalLimit,
+            totalLimit = roundedLimit,
             spent = 0.0,
             allocations = allocations
         )
         budgets.add(0, newBudget)
         selectedBudget = newBudget
+        recalculateMetrics()
         showToast("Budget created")
         persistBudgets()
+        return true
     }
 
     fun updateBudget(updated: BudgetItem) {
         val idx = budgets.indexOfFirst { it.id == updated.id }
         if (idx != -1) {
-            budgets[idx] = updated
-            selectedBudget = updated
+            val rounded = updated.copy(totalLimit = FinanceCalculator.roundMoney(updated.totalLimit))
+            budgets[idx] = rounded
+            selectedBudget = rounded
+            recalculateMetrics()
             showToast("Budget updated")
             persistBudgets()
         }
@@ -741,7 +983,13 @@ class SpendWiseViewModel(
     }
 
     // Category Operations
-    fun addCategory(name: String, iconType: String, colorHex: Long) {
+    fun addCategory(name: String, iconType: String, colorHex: Long): Boolean {
+        val validation = FinancialValidator.validateCategory(name)
+        if (!validation.isValid && validation is ValidationResult.Invalid) {
+            showToast(validation.message)
+            return false
+        }
+
         val newCat = CategoryItem(
             id = "cat-${System.currentTimeMillis()}",
             name = name,
@@ -752,8 +1000,10 @@ class SpendWiseViewModel(
         )
         categories.add(newCat)
         selectedCategory = newCat
+        recalculateMetrics()
         showToast("Category added")
         persistCategories()
+        return true
     }
 
     fun updateCategory(updated: CategoryItem) {
@@ -761,6 +1011,7 @@ class SpendWiseViewModel(
         if (idx != -1) {
             categories[idx] = updated
             selectedCategory = updated
+            recalculateMetrics()
             showToast("Category updated")
             persistCategories()
         }
@@ -794,9 +1045,7 @@ class SpendWiseViewModel(
         goals.clear()
         budgets.clear()
         categories.clear()
-        totalBalance = 0.0
-        monthlyIncome = 0.0
-        monthlyExpenses = 0.0
+        recalculateMetrics()
         currentScreen = AppScreen.WELCOME
         showToast("Account deleted and local data cleared")
     }

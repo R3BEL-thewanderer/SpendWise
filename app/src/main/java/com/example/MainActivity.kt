@@ -32,6 +32,7 @@ import com.example.ui.screens.AddCategoryScreen
 import com.example.ui.screens.AddExpenseScreen
 import com.example.ui.screens.AddIncomeScreen
 import com.example.ui.screens.AddMoneyToGoalScreen
+import com.example.ui.screens.AiAssistantModal
 import com.example.ui.screens.AnalyticsScreen
 import com.example.ui.screens.AppearanceScreen
 import com.example.ui.screens.BudgetDetailScreen
@@ -273,6 +274,10 @@ fun SpendWiseApp(viewModel: SpendWiseViewModel) {
                         viewModel = viewModel,
                         onDismiss = { viewModel.activeModal = ActiveModal.NONE }
                     )
+                }
+
+                ActiveModal.AI_ASSISTANT -> {
+                    AiAssistantModal(viewModel = viewModel)
                 }
 
                 else -> {}

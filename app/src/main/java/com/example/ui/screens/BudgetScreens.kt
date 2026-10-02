@@ -234,9 +234,10 @@ fun BudgetsOverviewScreen(viewModel: SpendWiseViewModel) {
 
                 // Category Budgets List
                 items(budget.allocations) { alloc ->
-                    val catSpent = (alloc.amount * (alloc.percentage / 100f * 3.5)).coerceAtMost(alloc.amount)
-                    val catProgress = (catSpent / alloc.amount).toFloat().coerceIn(0f, 1f)
-                    val catPercent = (catProgress * 100).toInt()
+                    val allocResult = viewModel.getCategoryBudgetResult(alloc, budget.month)
+                    val catSpent = allocResult.spent
+                    val catProgress = (allocResult.usagePercentage / 100.0).toFloat().coerceIn(0f, 1f)
+                    val catPercent = allocResult.usagePercentage.toInt()
 
                     GlassCard(
                         modifier = Modifier

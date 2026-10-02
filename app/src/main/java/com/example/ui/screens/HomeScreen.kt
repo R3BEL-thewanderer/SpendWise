@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,11 +26,16 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -47,6 +53,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.domain.ai.model.InsightSeverity
+import com.example.domain.ai.model.InsightType
+import com.example.domain.ai.model.SmartInsight
 import com.example.state.ActiveModal
 import com.example.state.AppScreen
 import com.example.state.SpendWiseViewModel
@@ -316,7 +325,189 @@ fun HomeScreen(
                         testTag = "quick_more_actions"
                     )
                 }
-                Spacer(modifier = Modifier.height(26.dp))
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // SpendWise AI Assistant Banner Card
+            item {
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.openAiAssistant() }
+                        .testTag("home_ai_assistant_banner"),
+                    shape = RoundedCornerShape(24.dp),
+                    elevation = 4.dp
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.linearGradient(
+                                    colors = if (isDark) {
+                                        listOf(
+                                            Color(0xFF2A2238).copy(alpha = 0.85f),
+                                            Color(0xFF1E212D).copy(alpha = 0.9f)
+                                        )
+                                    } else {
+                                        listOf(
+                                            SpendWiseTheme.colors.lavender.copy(alpha = 0.35f),
+                                            SpendWiseTheme.colors.softBlue.copy(alpha = 0.25f)
+                                        )
+                                    }
+                                )
+                            )
+                            .padding(18.dp)
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.linearGradient(
+                                                    listOf(SpendWiseTheme.colors.lavender, SpendWiseTheme.colors.softBlue)
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AutoAwesome,
+                                            contentDescription = "AI",
+                                            tint = Color(0xFF171717),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "SpendWise AI Assistant",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = textPrimary
+                                        )
+                                        Text(
+                                            text = "Instant answers from verified numbers",
+                                            fontSize = 11.sp,
+                                            color = textSecondary
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = SpendWiseTheme.colors.lavender,
+                                    modifier = Modifier.clickable { viewModel.openAiAssistant() }
+                                ) {
+                                    Text(
+                                        text = "Ask AI",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF171717),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Quick query pills
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val quickQueries = listOf("Where did money go?", "Food spend?", "How is budget?")
+                                quickQueries.forEach { q ->
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isDark) Color(0x33FFFFFF) else Color.White.copy(alpha = 0.8f),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, SpendWiseTheme.colors.glassBorder),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                viewModel.openAiAssistant()
+                                                viewModel.askAssistant(q)
+                                            }
+                                    ) {
+                                        Text(
+                                            text = q,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = textPrimary,
+                                            maxLines = 1,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(22.dp))
+            }
+
+            // Smart Insights Section
+            val smartInsights = viewModel.getSmartInsights()
+            if (smartInsights.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Smart Insights",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textPrimary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = SpendWiseTheme.colors.lavender.copy(alpha = 0.25f)
+                            ) {
+                                Text(
+                                    text = "AI",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) SpendWiseTheme.colors.lavender else Color(0xFF6B4EE6),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                item {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(smartInsights) { insight ->
+                            SmartInsightCard(
+                                insight = insight,
+                                onAction = {
+                                    when (insight.type) {
+                                        InsightType.BUDGET -> viewModel.navigateTo(AppScreen.BUDGETS)
+                                        InsightType.GOAL -> viewModel.navigateTo(AppScreen.GOALS)
+                                        InsightType.SPENDING -> viewModel.navigateTo(AppScreen.ANALYTICS)
+                                        InsightType.ANOMALY -> viewModel.navigateTo(AppScreen.TRANSACTIONS)
+                                        InsightType.SUMMARY -> viewModel.navigateTo(AppScreen.ANALYTICS)
+                                    }
+                                },
+                                onCardClick = { viewModel.openAiAssistant() }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
             }
 
             // Recent Transactions Header
@@ -426,5 +617,103 @@ private fun QuickActionButton(
             color = textPrimary,
             lineHeight = 14.sp
         )
+    }
+}
+
+@Composable
+private fun SmartInsightCard(
+    insight: SmartInsight,
+    onAction: () -> Unit,
+    onCardClick: () -> Unit
+) {
+    val textPrimary = SpendWiseTheme.colors.textPrimary
+    val textSecondary = SpendWiseTheme.colors.textSecondary
+    val isDark = SpendWiseTheme.colors.isDark
+
+    val accentColor = when (insight.severity) {
+        InsightSeverity.WARNING -> SpendWiseTheme.colors.softCoral
+        InsightSeverity.SUCCESS -> Color(0xFF34C759)
+        InsightSeverity.INFO -> SpendWiseTheme.colors.softBlue
+    }
+
+    GlassCard(
+        modifier = Modifier
+            .width(260.dp)
+            .clickable { onCardClick() }
+            .testTag("smart_insight_${insight.id}"),
+        shape = RoundedCornerShape(20.dp),
+        elevation = 3.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(accentColor.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val icon = when (insight.severity) {
+                        InsightSeverity.WARNING -> Icons.Default.Warning
+                        InsightSeverity.SUCCESS -> Icons.Default.CheckCircle
+                        InsightSeverity.INFO -> Icons.Default.Lightbulb
+                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                if (insight.actionText != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { onAction() }
+                    ) {
+                        Text(
+                            text = insight.actionText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SpendWiseTheme.colors.lavender
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = SpendWiseTheme.colors.lavender,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = insight.title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = textPrimary,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = insight.description,
+                fontSize = 12.sp,
+                color = textSecondary,
+                lineHeight = 16.sp,
+                maxLines = 3
+            )
+        }
     }
 }
